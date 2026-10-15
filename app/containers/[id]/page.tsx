@@ -12,13 +12,15 @@ export default function Detail() {
   const { id } = useParams<{ id: string }>();
   const [containers, setContainers] = useDemoContainers();
   const [container, setContainer] = useState<Container>();
+  const [loaded, setLoaded] = useState(false);
   const [form, setForm] = useState<Partial<Container>>({});
   const [errors, setErrors] = useState<Record<string,string>>({});
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{type:'success'|'error',text:string}>();
 
-  useEffect(() => { const found = containers.find((item) => item.id === id); setContainer(found); if (found) setForm(found); }, [containers, id]);
-  if (!container) return <AppShell><div className="content"><div className="panel" style={{padding:30}}>Loading container details…</div></div></AppShell>;
+  useEffect(() => { const found = containers.find((item) => item.id === id); setContainer(found); if (found) setForm(found); setLoaded(true); }, [containers, id]);
+  if (!loaded) return <AppShell><div className="content"><div className="panel" style={{padding:30}}>Loading container details…</div></div></AppShell>;
+  if (!container) return <AppShell><div className="content"><div className="panel" style={{padding:30}}><h2>Shipment not found</h2><p className="muted">This shipment ID does not match an available demo record.</p><Link href="/dashboard" className="primary-btn" style={{marginTop:16}}>Back to dashboard</Link></div></div></AppShell>;
   const update = (field: keyof Container, value: string) => { setForm((current) => ({...current, [field]: value})); setErrors((current) => ({...current, [field]: ''})); setFeedback(undefined); };
   const save = async (event: React.FormEvent) => {
     event.preventDefault();

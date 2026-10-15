@@ -18,8 +18,8 @@ export default function Updates() {
   const [selectedId, setSelectedId] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
   const [selected, setSelected] = useState<Container>();
-  useEffect(() => { const id = new URLSearchParams(window.location.search).get('container'); const fallback = id && containers.some((item) => item.id === id) ? id : containers[0]?.id || ''; setSelectedId(fallback); }, [containers]);
-  useEffect(() => { setSelected(containers.find((item) => item.id === selectedId) || containers[0]); }, [containers, selectedId]);
+  useEffect(() => { const id = new URLSearchParams(window.location.search).get('container'); setSelectedId(id && containers.some((item) => item.id === id) ? id : ''); }, [containers]);
+  useEffect(() => { setSelected(containers.find((item) => item.id === selectedId)); }, [containers, selectedId]);
   const { register, handleSubmit, reset, setError, formState: { errors, isSubmitting } } = useForm<FormData>({ resolver: zodResolver(schema), defaultValues: { destination: '', carrier: '', appointment: '', deliveredDate: '', notes: '' } });
   useEffect(() => { if (selected) reset({ destination: selected.destination, carrier: selected.carrier || '', appointment: toDateInput(selected.appointment), deliveredDate: selected.deliveredDate || '', notes: selected.notes || '' }); }, [selected, reset]);
 
@@ -32,7 +32,7 @@ export default function Updates() {
     if (!values.deliveredDate || !isValidDate(values.deliveredDate)) { setError('deliveredDate', { type: 'manual', message: 'Choose a valid delivered date.' }); return; }
     persist(values, 'Delivered'); setSavedMessage('Shipment marked as delivered. Returning…'); await new Promise((resolve) => setTimeout(resolve, 700)); leave();
   };
-  if (!selected) return <AppShell><div className="content"><div className="panel" style={{padding:30}}>Loading delivery form…</div></div></AppShell>;
+  if (!selected) return <AppShell><div className="content"><button type="button" className="back-link muted" onClick={leave}><ArrowLeft size={15}/> Back</button><div className="eyebrow">Staff workspace · Delivery updates</div><h1 className="page-title">Select a shipment</h1><p className="page-subtitle" style={{marginBottom:26}}>Choose a shipment from the existing container list to record a delivery update.</p><div className="panel detail-card"><div className="field"><label htmlFor="shipment-select">Shipment</label><select id="shipment-select" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Choose a shipment</option>{containers.map((item) => <option key={item.id} value={item.id}>{item.container} · {item.destination} · {item.status}</option>)}</select></div></div></div></AppShell>;
   return <AppShell><div className="content">
     <button type="button" className="back-link muted" onClick={leave}><ArrowLeft size={15}/> Back</button>
     <div className="eyebrow">Staff workspace · Delivery updates</div><h1 className="page-title">Record a delivery update</h1><p className="page-subtitle" style={{marginBottom:26}}>Add operational details for <span className="mono">{selected.container}</span>.</p>
