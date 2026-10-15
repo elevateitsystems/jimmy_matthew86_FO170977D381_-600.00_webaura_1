@@ -33,7 +33,7 @@ export default function Login() {
           <div className="eyebrow" style={{ color: "#d6aa5d" }}>
             Import operations
           </div>
-          <h1>Every container, clearly accounted for.</h1>
+          <h1>Container tracking workspace.</h1>
           <p>
             Track milestones, coordinate delivery, and keep your team moving
             with a single source of shipment truth.
