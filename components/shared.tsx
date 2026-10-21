@@ -6,15 +6,14 @@ import Link from 'next/link';
 import { formatDate } from '../lib/dates';
 import type { ContainerStatus, ContainerView } from '../lib/tracking';
 
-export type MetricKey = 'Not yet tracked' | 'Not collected' | 'At warehouse' | 'Dehired' | 'Delivered';
-export type MetricCount = { count: number; red: number; amber: number };
-
+export type MetricKey = 'At origin' | 'On water / arriving' | 'Not collected' | 'At warehouse' | 'Dehired' | 'Delivered';
 const statusTone: Record<ContainerStatus | 'Delivered', string> = { 'Not collected': 'blue', 'At warehouse': 'green', Dehired: 'gold', 'Not tracked': 'gray', Delivered: 'green' };
 export function StatusBadge({ status }: { status: ContainerStatus | 'Delivered' }) { return <span className={`status ${statusTone[status]}`}>{status}</span>; }
 export function DaysBadge({ container }: { container: ContainerView }) { return container.tone === 'normal' ? <>{container.daysText}</> : <span className={`tone-chip ${container.tone}`}>{container.daysText}</span>; }
-export function Metrics({ counts, onSelect }: { counts: Record<MetricKey, MetricCount>; onSelect: (key: MetricKey) => void }) {
-  const cards: [MetricKey, string][] = [['Not yet tracked', ''], ['Not collected', ''], ['At warehouse', ''], ['Dehired', 'gold'], ['Delivered', '']];
-  return <div className="metrics">{cards.map(([key, tone]) => { const { count, red, amber } = counts[key]; return <button type="button" key={key} className={`metric metric-button ${tone}`} onClick={() => onSelect(key)} aria-label={`View ${key} containers`}><div className="metric-label">{key}</div><div className="metric-value">{count}</div><div className="metric-note">{red || amber ? <>{red > 0 && <span className="tone-text red">{red} overdue</span>}{red > 0 && amber > 0 && ' · '}{amber > 0 && <span className="tone-text amber">{amber} due soon</span>}</> : '\u00a0'}</div></button>; })}</div>;
+const metricCards: [MetricKey, string, string][] = [['At origin', 'At origin', ''], ['On water / arriving', 'On water / arriving', ''], ['Not collected', 'Available • not collected', ''], ['At warehouse', 'At warehouse • not unpacked', ''], ['Dehired', 'Dehired • awaiting delivery', 'gold'], ['Delivered', 'Delivered', '']];
+/** `notes` is the small line under a number; a card is tinted when its key is in `alerts`. */
+export function Metrics({ counts, notes, alerts, onSelect }: { counts: Record<MetricKey, number>; notes: Partial<Record<MetricKey, string>>; alerts: MetricKey[]; onSelect: (key: MetricKey) => void }) {
+  return <div className="metrics">{metricCards.map(([key, label, tone]) => <button type="button" key={key} className={`metric metric-button ${tone} ${alerts.includes(key) ? 'alert' : ''}`} onClick={() => onSelect(key)} aria-label={`View ${label} containers`}><div className="metric-label">{label}</div><div className="metric-value">{counts[key]}</div><div className="metric-note">{notes[key] || '\u00a0'}</div></button>)}</div>;
 }
 export function ContainerTable({ rows }: { rows: ContainerView[] }) {
   const router = useRouter(); const [page, setPage] = useState(1); const [pageSize, setPageSize] = useState(15); const pageCount = Math.max(1, Math.ceil(rows.length / pageSize)); const currentPage = Math.min(page, pageCount);

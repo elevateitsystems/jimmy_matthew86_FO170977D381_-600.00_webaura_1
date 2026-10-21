@@ -4,6 +4,9 @@ import { diffDays, formatTime, todayISO } from './dates.ts';
 
 export type ContainerStatus = 'Not collected' | 'At warehouse' | 'Dehired' | 'Not tracked';
 export type Tone = 'red' | 'amber' | 'normal';
+export type TransitStage = 'At origin' | 'On water / arriving';
+/** A delivery counts as recent when its delivered date is at most this many days ago. */
+export const RECENT_DELIVERY_DAYS = 30;
 export type Milestone = 'AVAILABLE' | 'dischargedDate' | 'outgatedDate' | 'emptyReturnedDate';
 
 /** Amber when this many days (or fewer) remain; red once the date has passed. */
@@ -30,7 +33,7 @@ export type TrackerState = {
 };
 
 export type ContainerView = OpenTrackRecord & {
-  id: string; user: UserFields; tracked: boolean; delivered: boolean; status: ContainerStatus; tone: Tone;
+  id: string; user: UserFields; tracked: boolean; stage?: TransitStage; delivered: boolean; status: ContainerStatus; tone: Tone;
   /** Label and value of the date that drives the status (e.g. "Detention last free day"). */
   dateLabel: string; dateValue?: string;
   /** Days left until the deadline (negative once passed); for Dehired, days left until the 10-day limit. Null when the date is missing or invalid. */
@@ -53,6 +56,9 @@ export function getMilestones(record: OpenTrackRecord): Milestone[] {
   return found;
 }
 export const hasTrackingMilestone = (record: OpenTrackRecord) => getMilestones(record).length > 0;
+
+/** Where a container that is not tracked yet is: still at origin, or loaded and on its way / arriving. */
+export const getTransitStage = (record: OpenTrackRecord): TransitStage => (record.history ?? []).some((event) => event.type === 'LOADED' || event.type === 'VESSEL_ARRIVED') ? 'On water / arriving' : 'At origin';
 
 /** Priority: Dehired (empty returned) → At warehouse (outgated) → Not collected. */
 export function getStatus(record: OpenTrackRecord): Exclude<ContainerStatus, 'Not tracked'> {
@@ -87,12 +93,36 @@ export function buildView(id: string, record: OpenTrackRecord, user: UserFields,
   const daysRemaining = getDaysRemaining(record, status, today);
   const [dateLabel, dateValue] = status === 'Dehired' ? ['Empty returned', record.emptyReturnedDate] : status === 'At warehouse' ? ['Detention last free day', record.detentionLastFreeDay] : status === 'Not collected' ? ['Last free day', record.lastFreeDay] : ['ETA', record.eta];
   // Deadlines no longer matter once a container is delivered, so it is never highlighted.
-  return { ...record, id, user, tracked, delivered, status, tone: delivered ? 'normal' : getTone(daysRemaining), dateLabel, dateValue, daysRemaining, daysText: describeDays(status, daysRemaining) };
+  return { ...record, id, user, tracked, stage: tracked ? undefined : getTransitStage(record), delivered, status, tone: delivered ? 'normal' : getTone(daysRemaining), dateLabel, dateValue, daysRemaining, daysText: describeDays(status, daysRemaining) };
 }
 
 export function buildViews(state: TrackerState, today: string = todayISO()): ContainerView[] {
   const tracked = new Set(state.trackedIds);
   return Object.entries(state.records).map(([id, record]) => buildView(id, record, state.userFields[id] ?? {}, tracked.has(id), today));
+}
+
+export type SummaryFilter = 'Awaiting destination' | 'Awaiting carrier' | 'Booked, not yet delivered' | 'Due soon' | 'Overdue';
+export const summaryFilters: SummaryFilter[] = ['Awaiting destination', 'Awaiting carrier', 'Booked, not yet delivered', 'Due soon', 'Overdue'];
+/** On the tracking list and not yet delivered. */
+export const isActive = (item: ContainerView) => item.tracked && !item.delivered;
+export function matchesSummary(item: ContainerView, filter: SummaryFilter): boolean {
+  if (filter === 'Awaiting destination') return !present(item.user.destination);
+  if (filter === 'Awaiting carrier') return !present(item.user.carrier);
+  if (filter === 'Booked, not yet delivered') return present(item.user.appointment) && !present(item.user.deliveredDate);
+  return item.tone === (filter === 'Overdue' ? 'red' : 'amber');
+}
+
+export type MetricCount = { count: number; red: number; amber: number };
+/** Every dashboard number, derived from the container views. Each container is counted at most once per metric. */
+export function getDashboardCounts(views: ContainerView[], today: string = todayISO()) {
+  const count = (items: ContainerView[]): MetricCount => ({ count: items.length, red: items.filter((item) => item.tone === 'red').length, amber: items.filter((item) => item.tone === 'amber').length });
+  const active = views.filter(isActive), delivered = views.filter((item) => item.tracked && item.delivered), inTransit = views.filter((item) => !item.tracked);
+  const deliveredRecent = delivered.filter((item) => { const ago = diffDays(item.user.deliveredDate, today); return ago !== null && ago >= 0 && ago <= RECENT_DELIVERY_DAYS; }).length;
+  return {
+    active: active.length, inTransit: inTransit.length, deliveredRecent,
+    metrics: { 'At origin': count(inTransit.filter((item) => item.stage === 'At origin')), 'On water / arriving': count(inTransit.filter((item) => item.stage === 'On water / arriving')), 'Not collected': count(active.filter((item) => item.status === 'Not collected')), 'At warehouse': count(active.filter((item) => item.status === 'At warehouse')), Dehired: count(active.filter((item) => item.status === 'Dehired')), Delivered: count(delivered) },
+    summary: Object.fromEntries(summaryFilters.map((filter) => [filter, active.filter((item) => matchesSummary(item, filter)).length])) as Record<SummaryFilter, number>,
+  };
 }
 
 const toneRank: Record<Tone, number> = { red: 0, amber: 1, normal: 2 };
