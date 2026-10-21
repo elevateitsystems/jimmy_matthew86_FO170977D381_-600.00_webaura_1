@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
+import { showToast } from "../../components/toast";
 const schema = z.object({
   email: z.string().email("Enter a valid email address."),
   password: z.string().min(8, "Password must be at least 8 characters."),
@@ -20,7 +21,9 @@ export default function Login() {
     formState: { errors, isSubmitting },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
   const submit = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     localStorage.setItem("jm_authenticated", "true");
+    showToast("Signed in successfully", "Welcome back to your container tracking workspace.");
     router.replace("/dashboard");
   };
   return (
@@ -98,7 +101,13 @@ export default function Login() {
               type="submit"
               disabled={isSubmitting}
             >
-              {isSubmitting ? "Signing in…" : "Sign in to dashboard"}
+              {isSubmitting ? (
+                <>
+                  <LoaderCircle size={16} className="spin" /> Signing in…
+                </>
+              ) : (
+                "Sign in to dashboard"
+              )}
             </button>
           </form>
         </div>

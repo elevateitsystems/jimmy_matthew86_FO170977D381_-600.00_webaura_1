@@ -5,9 +5,11 @@ import { AppShell } from '../../components/layout';
 
 const faqs = [
   ['How do I update a container?', 'Open Delivery updates, select a container, enter the available delivery details, and save the update. The demo workspace stores changes locally.'],
-  ['What does After dehire mean?', 'These containers have been unpacked and the empty equipment has been returned. They remain here until delivery details are complete.'],
+  ['How are containers added and what do the statuses mean?', 'A container is added automatically once OpenTrack reports an AVAILABLE event, a discharged date, an outgated date or an empty returned date. Dehired means the empty was returned (days since return are shown); At warehouse means it was outgated but the empty is not back yet (detention last free day is shown); Not collected means it has not been outgated (last free day is shown).'],
+  ['What do the red and amber dates mean?', 'Last free day and detention last free day turn amber with 0–2 days left and red once passed. Dehired containers turn amber at 8–10 days since the empty was returned and red after 10 days. Red rows are listed first, then amber.'],
+  ['When does a container move to Delivered?', 'Only when a final destination, a carrier and a delivered date are all entered. Being Dehired alone does not move it. Your entries are kept when OpenTrack data refreshes.'],
   ['How do summary cards work?', 'Select a summary card on the dashboard to see only the matching demo records. Cards with no matching records show an empty state.'],
-  ['Is this connected to OpenTrack?', 'Not yet. This workspace currently uses demo data; OpenTrack integration is planned for Phase 2.'],
+  ['Is this connected to OpenTrack?', 'Not yet. This workspace currently uses demo data; Refresh data simulates an OpenTrack update (every third refresh simulates a connection failure and keeps your current data). OpenTrack integration is planned for Phase 2.'],
 ] as const;
 
 export default function HelpPage() {

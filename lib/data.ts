@@ -1,10 +1,98 @@
-export type ShipmentStatus = 'At origin' | 'On water' | 'At port' | 'Out to warehouse' | 'After dehire' | 'Delivered';
-export type Container = { id:string; container:string; mbl:string; size:string; origin:string; port:string; destination:string; line:string; vessel:string; status:ShipmentStatus; eta:string; milestone:string; days:number; carrier?:string; driver?:string; truckNumber?:string; appointment?:string; deliveredDate?:string; destinationAddress?:string; contactName?:string; contactPhone?:string; notes?:string };
+import { addDays } from './dates.ts';
 
-const routes = [['Ningbo, CN','Norfolk · NIT','Richmond, VA','Maersk','HAIPHONG EXPRESS'],['Yantian, CN','Norfolk · NIT','Landover, MD','Maersk','MAERSK EDIRNE'],['Shanghai, CN','Houston · Bayport','Commerce, TX','MSC','MSC VIVIANA'],['Qingdao, CN','Baltimore · Seagirt','Baltimore, MD','CMA CGM','CMA CGM TANYA'],['Busan, KR','Savannah · Garden City','Atlanta, GA','Hapag-Lloyd','ALGOLUNA']] as const;
-const statusInfo:Record<ShipmentStatus,[string,string]> = {'At origin':['Gate in','22 Oct'],'On water':['Loaded on vessel','18 Oct'],'At port':['Discharged','29 Sep'],'Out to warehouse':['Full outgated','08 Oct'],'After dehire':['Empty returned','03 Sep'],Delivered:['Delivered','25 Sep']};
-function makeContainer(index:number,status:ShipmentStatus):Container { const route=routes[index%routes.length], prefix=['HASU','MIRKU','TCNU','TGHU','MSCU','SEKU','CMAU'][index%7], number=String(401413+index*137).padStart(6,'0').slice(-6), [milestone,eta]=statusInfo[status], hasDelivery=status==='Out to warehouse'||status==='After dehire'||status==='Delivered'; return {id:`${prefix.toLowerCase()}-${number}-${index}`,container:`${prefix} ${number} ${index%10}`,mbl:`${272932148+(index%8)*14987}`,size:index%4===0?'20':'40HC (45G1)',origin:route[0],port:route[1],destination:route[2],line:route[3],vessel:route[4],status,eta,milestone,days:status==='After dehire'?11+index%34:status==='Out to warehouse'?1+index%7:0,carrier:hasDelivery?['Middle Bay Transportation LLC','Chesapeake Haulage','Priority 1','Triangle Freight'][index%4]:undefined,driver:hasDelivery?['Alex Morgan','Jordan Lee','Sam Rivera'][index%3]:undefined,truckNumber:hasDelivery?`JM-${110+index}`:undefined,appointment:hasDelivery?`${String(index%27+1).padStart(2,'0')} Oct`:undefined,deliveredDate:status==='Delivered'?`2024-09-${String(index%20+5).padStart(2,'0')}`:undefined,destinationAddress:hasDelivery?`${100+index} Commerce Way, ${route[2]}`:undefined,contactName:hasDelivery?['Receiving desk','Kim Patel','Warehouse operations'][index%3]:undefined,contactPhone:hasDelivery?'(804) 555-01'+String(index%10):undefined}; }
-export const containers:Container[]=[...Array.from({length:35},(_,i)=>makeContainer(i,'At origin')),...Array.from({length:139},(_,i)=>makeContainer(i+35,'On water')),...Array.from({length:4},(_,i)=>makeContainer(i+174,'Out to warehouse')),...Array.from({length:59},(_,i)=>makeContainer(i+178,'After dehire')),...Array.from({length:13},(_,i)=>makeContainer(i+237,'Delivered'))];
-export const events=[{title:'Out-gated from terminal',date:'07 Oct 2024 · 09:42 AM',desc:'Container released to the assigned dray carrier.'},{title:'Discharged from vessel',date:'03 Oct 2024 · 06:15 AM',desc:'Discharged at the destination terminal.'},{title:'Vessel arrived',date:'02 Oct 2024',desc:'Vessel arrived at the destination port.'},{title:'Loaded on vessel',date:'14 Sep 2024',desc:'Loaded at origin port.'}];
-export const statusCounts:Record<ShipmentStatus,number>={'At origin':35,'On water':139,'At port':0,'Out to warehouse':4,'After dehire':59,Delivered:13};
-export const DEMO_STORAGE_KEY='jm_container_demo_data'; export const DEMO_DATA_EVENT='jm-container-data-updated';
+/** One event in an OpenTrack container history, e.g. { type: 'AVAILABLE', date: '2026-10-19' }. */
+export type OpenTrackEvent = { type: string; date: string };
+
+/** Fields that come from (demo) OpenTrack. Never edited by users and replaced wholesale on refresh. */
+export type OpenTrackRecord = {
+  container: string; mbl: string; size: string; origin: string; port: string; line: string; vessel: string; eta?: string;
+  history: OpenTrackEvent[];
+  dischargedDate?: string; outgatedDate?: string; emptyReturnedDate?: string; lastFreeDay?: string; detentionLastFreeDay?: string;
+};
+
+/** Fields entered by staff. Stored separately from OpenTrack data so a refresh can never overwrite them. */
+export type UserFields = { destination?: string; carrier?: string; appointment?: string; deliveredDate?: string; notes?: string; driver?: string; truckNumber?: string; destinationAddress?: string; contactName?: string; contactPhone?: string };
+
+export const DEMO_STORAGE_KEY = 'jm_container_tracker_v2';
+
+const normalize = (value: string) => value.replace(/[^a-z0-9]/gi, '').toUpperCase();
+export const containerId = (container: string) => normalize(container).toLowerCase();
+export function formatContainerNumber(container: string) { const key = normalize(container); return /^[A-Z]{4}\d{7}$/.test(key) ? `${key.slice(0, 4)} ${key.slice(4, 10)} ${key.slice(10)}` : key; }
+
+const routes = [['Ningbo, CN', 'Norfolk · NIT', 'Richmond, VA', 'Maersk', 'HAIPHONG EXPRESS'], ['Yantian, CN', 'Norfolk · NIT', 'Landover, MD', 'Maersk', 'MAERSK EDIRNE'], ['Shanghai, CN', 'Houston · Bayport', 'Commerce, TX', 'MSC', 'MSC VIVIANA'], ['Qingdao, CN', 'Baltimore · Seagirt', 'Baltimore, MD', 'CMA CGM', 'CMA CGM TANYA'], ['Busan, KR', 'Savannah · Garden City', 'Atlanta, GA', 'Hapag-Lloyd', 'ALGOLUNA']] as const;
+const carriers = ['Middle Bay Transportation LLC', 'Chesapeake Haulage', 'Priority 1', 'Triangle Freight'] as const;
+
+/** A date given as a day offset from today, literal text (to simulate bad data), or null/undefined for "absent". */
+type DateSpec = number | string | null;
+type Milestones = { gateIn?: number; loaded?: number; arrived?: number; discharged?: number; available?: number; outgated?: number; emptyReturned?: DateSpec; eta?: number; lastFreeDay?: DateSpec; detentionLastFreeDay?: DateSpec };
+
+function baseRecord(index: number): OpenTrackRecord {
+  const route = routes[index % routes.length], prefix = ['HASU', 'MRKU', 'TCNU', 'TGHU', 'MSCU', 'SEKU', 'CMAU'][index % 7], number = String(401413 + index * 137).padStart(6, '0').slice(-6);
+  return { container: formatContainerNumber(`${prefix}${number}${index % 10}`), mbl: `${272932148 + (index % 8) * 14987}`, size: index % 4 === 0 ? '20' : '40HC (45G1)', origin: route[0], port: route[1], line: route[3], vessel: route[4], history: [] };
+}
+
+/** Adds milestones to a record the way a later OpenTrack response would: date fields plus matching history events. */
+function withMilestones(record: OpenTrackRecord, today: string, m: Milestones): OpenTrackRecord {
+  const at = (spec: DateSpec | undefined) => (typeof spec === 'number' ? addDays(today, spec) : spec ?? undefined);
+  const next: OpenTrackRecord = { ...record, history: [...record.history] };
+  const event = (type: string, spec: DateSpec | undefined) => { if (spec === undefined) return; next.history = next.history.filter((item) => item.type !== type); next.history.push({ type, date: at(spec)! }); };
+  event('GATE_IN', m.gateIn); event('LOADED', m.loaded); event('VESSEL_ARRIVED', m.arrived); event('DISCHARGED', m.discharged); event('AVAILABLE', m.available); event('OUTGATED', m.outgated); event('EMPTY_RETURNED', m.emptyReturned);
+  if (m.discharged !== undefined) next.dischargedDate = at(m.discharged);
+  if (m.outgated !== undefined) next.outgatedDate = at(m.outgated);
+  if (m.emptyReturned !== undefined) next.emptyReturnedDate = at(m.emptyReturned);
+  if ('lastFreeDay' in m) next.lastFreeDay = at(m.lastFreeDay);
+  if ('detentionLastFreeDay' in m) next.detentionLastFreeDay = at(m.detentionLastFreeDay);
+  if (m.eta !== undefined) next.eta = at(m.eta); else if (m.arrived !== undefined) next.eta = at(m.arrived);
+  next.history.sort((a, b) => a.date.localeCompare(b.date));
+  return next;
+}
+
+/** A vessel that arrived and was discharged `ago` days ago and is now AVAILABLE. */
+const landed = (ago: number): Milestones => ({ loaded: -ago - 25, arrived: -ago - 3, discharged: -ago - 1, available: -ago });
+/** A container whose empty was returned `days` days ago (outgated three days before that). */
+const dehired = (days: number): Milestones => ({ ...landed(days + 8), outgated: -days - 3, emptyReturned: -days, lastFreeDay: -days - 2, detentionLastFreeDay: -days + 4 });
+
+// Index → milestones. Indexes 0–29 cover every detection, status and date-colour scenario; 30+ have not reached a tracking milestone yet.
+const scenarios: Milestones[] = [
+  // Not collected: last free day 7, 3 (normal), 2, 1, 0 (amber), -1, -5 (red), missing, unparsable; then AVAILABLE-only and dischargedDate-only detection.
+  { ...landed(3), lastFreeDay: 7 }, { ...landed(4), lastFreeDay: 3 }, { ...landed(5), lastFreeDay: 2 }, { ...landed(5), lastFreeDay: 1 }, { ...landed(6), lastFreeDay: 0 }, { ...landed(7), lastFreeDay: -1 }, { ...landed(12), lastFreeDay: -5 }, { ...landed(2) }, { ...landed(2), lastFreeDay: 'TBD' },
+  { loaded: -20, arrived: -2, available: -1, lastFreeDay: 4 }, { loaded: -22, arrived: -3, discharged: -2, lastFreeDay: 9 },
+  // At warehouse: detention last free day 6, 3 (normal), 2, 0 (amber), -1, -4 (red), missing; then outgatedDate-only detection and a 1-day amber.
+  { ...landed(8), outgated: -2, lastFreeDay: -2, detentionLastFreeDay: 6 }, { ...landed(8), outgated: -3, lastFreeDay: -1, detentionLastFreeDay: 3 }, { ...landed(9), outgated: -4, lastFreeDay: -2, detentionLastFreeDay: 2 }, { ...landed(9), outgated: -5, lastFreeDay: -3, detentionLastFreeDay: 0 }, { ...landed(14), outgated: -9, lastFreeDay: -6, detentionLastFreeDay: -1 }, { ...landed(20), outgated: -14, lastFreeDay: -10, detentionLastFreeDay: -4 }, { ...landed(8), outgated: -3 },
+  { loaded: -30, outgated: -1, lastFreeDay: -3, detentionLastFreeDay: 5 }, { ...landed(10), outgated: -6, lastFreeDay: -4, detentionLastFreeDay: 1 },
+  // Dehired: 2 and 7 days (normal), 8, 9, 10 (amber), 11, 24 (red); then emptyReturnedDate-only, a passed detention date, and an unparsable date.
+  dehired(2), dehired(7), dehired(8), dehired(9), dehired(10), dehired(11), dehired(24), { loaded: -40, emptyReturned: -5 }, { ...dehired(3), outgated: -9, detentionLastFreeDay: -2 }, { ...dehired(1), emptyReturned: 'unknown' },
+];
+const untrackedCount = 24, untrackedStart = scenarios.length;
+function untrackedMilestones(position: number): Milestones {
+  const kind = position % 3;
+  return kind === 0 ? { loaded: -22, arrived: -(position % 4), eta: -(position % 4) } : kind === 1 ? { loaded: -(5 + position % 12), eta: 8 + position % 14 } : { gateIn: -(2 + position % 5), eta: 25 + position % 9 };
+}
+
+export function buildDemoFeed(today: string) {
+  const indexes = Array.from({ length: untrackedStart + untrackedCount }, (_, index) => index);
+  const base = indexes.map((index) => baseRecord(index));
+  const milestones = (index: number) => index < untrackedStart ? scenarios[index] : untrackedMilestones(index - untrackedStart);
+  const world0 = base.map((record, index) => withMilestones(record, today, milestones(index)));
+  const advance = (world: OpenTrackRecord[], changes: [number, Milestones][]) => changes.reduce((current, [index, m]) => current.map((record) => record.container === base[index].container ? withMilestones(record, today, m) : record), world);
+  const without = (world: OpenTrackRecord[], omitted: number[]) => world.filter((record) => !omitted.some((index) => base[index].container === record.container));
+  const duplicateOf = (world: OpenTrackRecord[], index: number) => { const original = world.find((record) => record.container === base[index].container)!; return { ...original, container: original.container.replace(/ /g, '') }; };
+
+  // Each frame is the full response of one successful refresh; the world keeps evolving between them.
+  const world1 = advance(world0, [[untrackedStart, { discharged: -1, available: 0, lastFreeDay: 5 }], [untrackedStart + 3, { discharged: 0, lastFreeDay: 6 }], [5, { outgated: 0, detentionLastFreeDay: 4 }], [14, { emptyReturned: 0 }], [4, { lastFreeDay: 3 }]]);
+  const world2 = [...advance(world1, [[untrackedStart + 6, { available: 0, lastFreeDay: 2 }], [untrackedStart + 9, { outgated: -1, detentionLastFreeDay: 3 }], [untrackedStart + 1, { eta: 6 }]]), withMilestones(baseRecord(untrackedStart + untrackedCount), today, { ...landed(0), lastFreeDay: 5 })];
+  const world3 = advance(world2, [[untrackedStart + 12, { discharged: -1, lastFreeDay: 6 }]]);
+  const frames = [world0, [...without(world1, [26]), duplicateOf(world1, 2)], without(world2, [26, 15]), world3];
+
+  const destination = (index: number) => routes[index % routes.length][2];
+  const seeds: [number, UserFields][] = [
+    [20, { destination: destination(20), carrier: carriers[0], appointment: addDays(today, -2), deliveredDate: addDays(today, -1) }],
+    [21, { destination: destination(21), carrier: carriers[1], appointment: addDays(today, -4), deliveredDate: addDays(today, -3) }],
+    [12, { destination: destination(12), carrier: carriers[2], appointment: addDays(today, -1), deliveredDate: addDays(today, -1) }],
+    [22, { destination: destination(22), carrier: carriers[3] }], [23, { destination: destination(23), deliveredDate: addDays(today, -2) }], [24, { carrier: carriers[0], deliveredDate: addDays(today, -1) }],
+    [11, { destination: destination(11), carrier: carriers[1], appointment: addDays(today, 1), notes: 'Appointment confirmed with the receiving desk.' }],
+    [untrackedStart, { destination: destination(untrackedStart), carrier: carriers[2], appointment: addDays(today, 9), notes: 'Pre-booked before arrival.' }],
+  ];
+  const userFields = Object.fromEntries(seeds.map(([index, fields]) => [containerId(base[index].container), fields]));
+  return { frames, userFields };
+}
