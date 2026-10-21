@@ -63,16 +63,29 @@ const scenarios: Milestones[] = [
   // Dehired: 2 and 7 days (normal), 8, 9, 10 (amber), 11, 24 (red); then emptyReturnedDate-only, a passed detention date, and an unparsable date.
   dehired(2), dehired(7), dehired(8), dehired(9), dehired(10), dehired(11), dehired(24), { loaded: -40, emptyReturned: -5 }, { ...dehired(3), outgated: -9, detentionLastFreeDay: -2 }, { ...dehired(1), emptyReturned: 'unknown' },
 ];
-const untrackedCount = 24, untrackedStart = scenarios.length;
+const untrackedCount = 169, untrackedStart = scenarios.length;
 function untrackedMilestones(position: number): Milestones {
-  const kind = position % 3;
-  return kind === 0 ? { loaded: -22, arrived: -(position % 4), eta: -(position % 4) } : kind === 1 ? { loaded: -(5 + position % 12), eta: 8 + position % 14 } : { gateIn: -(2 + position % 5), eta: 25 + position % 9 };
+  return position % 3 === 0 ? { loaded: -22, arrived: -(position % 4), eta: -(position % 4) } : { loaded: -(5 + position % 12), eta: 8 + position % 14 };
 }
 
+/** Bulk containers that are on the tracking list, sized so the dashboard totals match the client's reference figures. */
+const BULK_NOT_COLLECTED = 7, BULK_AT_WAREHOUSE = 22, BULK_DEHIRED_RED = 55, BULK_DEHIRED_OTHER = [1, 3, 4, 5, 6, 7, 8, 9, 10, 2, 6, 7, 8, 9], BULK_DELIVERED = 13, BULK_WITH_DESTINATION = 57;
+type Bulk = { m: Milestones; delivered?: number };
+const bulk: Bulk[] = [
+  ...Array.from({ length: BULK_NOT_COLLECTED }, (_, i): Bulk => ({ m: { ...landed(2 + i % 4), lastFreeDay: 1 + i % 7 } })),
+  ...Array.from({ length: BULK_AT_WAREHOUSE }, (_, i): Bulk => ({ m: { ...landed(9 + i % 5), outgated: -(1 + i % 8), lastFreeDay: -(2 + i % 4), detentionLastFreeDay: i % 11 === 0 ? 1 : 3 + i % 7 } })),
+  ...Array.from({ length: BULK_DEHIRED_RED }, (_, i): Bulk => ({ m: dehired(12 + i % 20) })),
+  ...BULK_DEHIRED_OTHER.map((days): Bulk => ({ m: dehired(days) })),
+  // Delivered: seven in the last 30 days, the rest older.
+  ...Array.from({ length: BULK_DELIVERED }, (_, i): Bulk => i < 7 ? { m: dehired(3 + i * 2), delivered: 1 + i * 2 } : { m: dehired(48 + (i - 7) * 6), delivered: 38 + (i - 7) * 6 }),
+];
+const bulkActive = bulk.length - BULK_DELIVERED;
+
 export function buildDemoFeed(today: string) {
-  const indexes = Array.from({ length: untrackedStart + untrackedCount }, (_, index) => index);
+  const bulkStart = untrackedStart + untrackedCount, newContainerIndex = bulkStart + bulk.length;
+  const indexes = Array.from({ length: newContainerIndex }, (_, index) => index);
   const base = indexes.map((index) => baseRecord(index));
-  const milestones = (index: number) => index < untrackedStart ? scenarios[index] : untrackedMilestones(index - untrackedStart);
+  const milestones = (index: number) => index < untrackedStart ? scenarios[index] : index < bulkStart ? untrackedMilestones(index - untrackedStart) : bulk[index - bulkStart].m;
   const world0 = base.map((record, index) => withMilestones(record, today, milestones(index)));
   const advance = (world: OpenTrackRecord[], changes: [number, Milestones][]) => changes.reduce((current, [index, m]) => current.map((record) => record.container === base[index].container ? withMilestones(record, today, m) : record), world);
   const without = (world: OpenTrackRecord[], omitted: number[]) => world.filter((record) => !omitted.some((index) => base[index].container === record.container));
@@ -80,7 +93,7 @@ export function buildDemoFeed(today: string) {
 
   // Each frame is the full response of one successful refresh; the world keeps evolving between them.
   const world1 = advance(world0, [[untrackedStart, { discharged: -1, available: 0, lastFreeDay: 5 }], [untrackedStart + 3, { discharged: 0, lastFreeDay: 6 }], [5, { outgated: 0, detentionLastFreeDay: 4 }], [14, { emptyReturned: 0 }], [4, { lastFreeDay: 3 }]]);
-  const world2 = [...advance(world1, [[untrackedStart + 6, { available: 0, lastFreeDay: 2 }], [untrackedStart + 9, { outgated: -1, detentionLastFreeDay: 3 }], [untrackedStart + 1, { eta: 6 }]]), withMilestones(baseRecord(untrackedStart + untrackedCount), today, { ...landed(0), lastFreeDay: 5 })];
+  const world2 = [...advance(world1, [[untrackedStart + 6, { available: 0, lastFreeDay: 2 }], [untrackedStart + 9, { outgated: -1, detentionLastFreeDay: 3 }], [untrackedStart + 1, { eta: 6 }]]), withMilestones(baseRecord(newContainerIndex), today, { ...landed(0), lastFreeDay: 5 })];
   const world3 = advance(world2, [[untrackedStart + 12, { discharged: -1, lastFreeDay: 6 }]]);
   const frames = [world0, [...without(world1, [26]), duplicateOf(world1, 2)], without(world2, [26, 15]), world3];
 
@@ -90,9 +103,18 @@ export function buildDemoFeed(today: string) {
     [21, { destination: destination(21), carrier: carriers[1], appointment: addDays(today, -4), deliveredDate: addDays(today, -3) }],
     [12, { destination: destination(12), carrier: carriers[2], appointment: addDays(today, -1), deliveredDate: addDays(today, -1) }],
     [22, { destination: destination(22), carrier: carriers[3] }], [23, { destination: destination(23), deliveredDate: addDays(today, -2) }], [24, { carrier: carriers[0], deliveredDate: addDays(today, -1) }],
+    [6, { destination: destination(6), carrier: carriers[3], appointment: addDays(today, -6), deliveredDate: addDays(today, -5) }],
+    [15, { destination: destination(15), carrier: carriers[0], appointment: addDays(today, -9), deliveredDate: addDays(today, -8) }],
+    [16, { destination: destination(16), carrier: carriers[1], appointment: addDays(today, -13), deliveredDate: addDays(today, -12) }],
     [11, { destination: destination(11), carrier: carriers[1], appointment: addDays(today, 1), notes: 'Appointment confirmed with the receiving desk.' }],
     [untrackedStart, { destination: destination(untrackedStart), carrier: carriers[2], appointment: addDays(today, 9), notes: 'Pre-booked before arrival.' }],
   ];
+  bulk.forEach((item, position) => {
+    const index = bulkStart + position;
+    if (item.delivered !== undefined) { seeds.push([index, { destination: destination(index), carrier: carriers[index % 4], appointment: addDays(today, -item.delivered - 1), deliveredDate: addDays(today, -item.delivered) }]); return; }
+    // (57 × k) mod 98 visits every residue once, so exactly BULK_WITH_DESTINATION of the active bulk containers get a destination.
+    if ((position * BULK_WITH_DESTINATION) % bulkActive < BULK_WITH_DESTINATION) seeds.push([index, { destination: destination(index), carrier: carriers[index % 4], ...(position % 5 === 0 ? { appointment: addDays(today, 2 + position % 6) } : {}) }]);
+  });
   const userFields = Object.fromEntries(seeds.map(([index, fields]) => [containerId(base[index].container), fields]));
   return { frames, userFields };
 }

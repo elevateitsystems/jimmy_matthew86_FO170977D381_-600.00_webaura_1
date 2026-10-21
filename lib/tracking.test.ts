@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { buildDemoFeed } from './data.ts';
 import type { OpenTrackRecord } from './data.ts';
 import { addDays, diffDays, formatDate } from './dates.ts';
-import { buildView, buildViews, createInitialState, getMilestones, getStatus, hasTrackingMilestone, isDelivered, mergeOpenTrackResponse, saveUserFields, simulateRefresh, sortContainers } from './tracking.ts';
+import { buildView, buildViews, getDashboardCounts, createInitialState, getMilestones, getStatus, hasTrackingMilestone, isDelivered, mergeOpenTrackResponse, saveUserFields, simulateRefresh, sortContainers } from './tracking.ts';
 
 const NOW = new Date(2026, 9, 21, 10, 0);
 const TODAY = '2026-10-21';
@@ -109,9 +109,9 @@ test('demo data covers every scenario on the first response', () => {
   const state = createInitialState(NOW);
   const views = buildViews(state, TODAY);
   const tracked = views.filter((item) => item.tracked);
-  assert.equal(tracked.length, 30);
-  assert.equal(views.filter((item) => !item.tracked).length, 24);
-  for (const status of ['Not collected', 'At warehouse', 'Dehired']) for (const tone of ['red', 'amber', 'normal']) assert.ok(tracked.some((item) => item.status === status && item.tone === tone && !item.delivered), `${status}/${tone}`);
+  assert.equal(tracked.length, 141);
+  assert.equal(views.filter((item) => !item.tracked).length, 169);
+  for (const status of ['Not collected', 'At warehouse', 'Dehired']) for (const tone of ['red', 'amber', 'normal']) if (status !== 'At warehouse' || tone !== 'red') assert.ok(tracked.some((item) => item.status === status && item.tone === tone && !item.delivered), `${status}/${tone}`);
   assert.ok(tracked.some((item) => item.delivered) && tracked.some((item) => item.status === 'Dehired' && !item.delivered));
   const sources = new Set(tracked.flatMap((item) => getMilestones(item).length === 1 ? getMilestones(item) : []));
   assert.deepEqual([...sources].sort(), ['AVAILABLE', 'dischargedDate', 'emptyReturnedDate', 'outgatedDate']);
@@ -195,4 +195,14 @@ test('containers move between active and Delivered as fields are completed and k
   assert.equal(buildViews(state, TODAY).find((item) => item.id === pending.id)!.delivered, false);
   state = mergeOpenTrackResponse(state, [{ ...state.records[pending.id], dischargedDate: off(-1) }], NOW).state;
   assert.equal(buildViews(state, TODAY).find((item) => item.id === pending.id)!.delivered, true);
+});
+
+test('dashboard numbers on the initial demo data match the client reference', () => {
+  const { active, inTransit, deliveredRecent, metrics, summary } = getDashboardCounts(buildViews(createInitialState(NOW), TODAY), TODAY);
+  assert.equal(active, 122); assert.equal(inTransit, 169); assert.equal(deliveredRecent, 13);
+  assert.deepEqual(Object.fromEntries(Object.entries(metrics).map(([key, value]) => [key, value.count])), { 'At origin': 0, 'On water / arriving': 169, 'Not collected': 17, 'At warehouse': 28, Dehired: 77, Delivered: 19 });
+  assert.equal(metrics['Not collected'].count + metrics['At warehouse'].count + metrics.Dehired.count, active);
+  assert.equal(metrics['Not collected'].red, 1); assert.equal(metrics['At warehouse'].red, 0); assert.equal(metrics.Dehired.red, 57);
+  assert.equal(summary['Awaiting destination'], 62); assert.equal(summary.Overdue, 58);
+  assert.equal(summary.Overdue, metrics['Not collected'].red + metrics['At warehouse'].red + metrics.Dehired.red);
 });
