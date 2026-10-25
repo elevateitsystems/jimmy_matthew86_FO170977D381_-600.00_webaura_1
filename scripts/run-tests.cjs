@@ -1,0 +1,12 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const root = path.resolve(__dirname, '..');
+const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
+const compile = spawnSync(process.execPath, [compiler, '-p', 'tsconfig.test.json'], { cwd: root, stdio: 'inherit' });
+if (compile.error) console.error(compile.error);
+if (compile.status !== 0) process.exit(compile.status ?? 1);
+const files = fs.readdirSync(path.join(root, 'lib')).filter(name => name.endsWith('.test.ts')).map(name => path.join(root, '.test-build', name.replace(/\.ts$/, '.js')));
+const result = spawnSync(process.execPath, ['--test', ...files], { cwd: root, stdio: 'inherit' });
+if (result.error) console.error(result.error);
+process.exit(result.status ?? 1);

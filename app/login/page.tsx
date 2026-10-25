@@ -1,5 +1,4 @@
 "use client";
-import Link from "next/link";
 import { Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -7,8 +6,9 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { showToast } from "../../components/toast";
+import { apiJson, errorMessage } from "../../lib/api";
 const schema = z.object({
-  email: z.string().email("Enter a valid email address."),
+  email: z.string().trim().email("Enter a valid email address."),
   password: z.string().min(8, "Password must be at least 8 characters."),
 });
 type FormData = z.infer<typeof schema>;
@@ -18,13 +18,17 @@ export default function Login() {
   const {
     register,
     handleSubmit,
+    setError,
+    clearErrors,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
-  const submit = async () => {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    localStorage.setItem("jm_authenticated", "true");
-    showToast("Signed in successfully", "Welcome back to your container tracking workspace.");
-    router.replace("/dashboard");
+  const submit = async (values: FormData) => {
+    clearErrors('root');
+    try {
+      await apiJson('/auth/login', { method: 'POST', body: JSON.stringify(values) });
+      showToast('Signed in successfully', 'Welcome back to your container tracking workspace.');
+      router.replace('/containers');
+    } catch (error) { setError('root', { message: errorMessage(error) }); }
   };
   return (
     <main className="login-page">
@@ -51,12 +55,14 @@ export default function Login() {
           <div className="eyebrow">Team access</div>
           <h2>Welcome back</h2>
           <p>Sign in to your container tracking workspace.</p>
-          <form className="form-stack" onSubmit={handleSubmit(submit)}>
+          <form className="form-stack" onSubmit={handleSubmit(submit)} onChange={() => clearErrors('root')}>
+            {errors.root && <div className="notice error" role="alert">{errors.root.message}</div>}
             <div className="field">
               <label htmlFor="email">Work email</label>
               <input
                 id="email"
                 type="email"
+                autoComplete="username"
                 placeholder="you@javamaryland.com"
                 {...register("email")}
               />
@@ -72,6 +78,7 @@ export default function Login() {
                 <input
                   id="password"
                   type={show ? "text" : "password"}
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   {...register("password")}
                 />
@@ -90,12 +97,7 @@ export default function Login() {
                 </span>
               )}
             </div>
-            <div className="login-small">
-              <span>Prototype environment</span>
-              <Link href="/register" style={{ color: "#1b578c" }}>
-                Create account
-              </Link>
-            </div>
+<div className="login-small"><span>Use your workspace account to sign in.</span></div>
             <button
               className="primary-btn full"
               type="submit"
@@ -106,7 +108,7 @@ export default function Login() {
                   <LoaderCircle size={16} className="spin" /> Signing in…
                 </>
               ) : (
-                "Sign in to dashboard"
+                "Sign in to containers"
               )}
             </button>
           </form>
