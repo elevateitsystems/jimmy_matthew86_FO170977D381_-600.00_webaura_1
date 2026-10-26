@@ -47,7 +47,7 @@ export default function Login() {
           </p>
         </div>
         <div className="hero-foot">
-          Java Maryland · Operations platform · Phase 1 prototype
+          Java Maryland · Operations platform
         </div>
       </section>
       <section className="login-form-area">
