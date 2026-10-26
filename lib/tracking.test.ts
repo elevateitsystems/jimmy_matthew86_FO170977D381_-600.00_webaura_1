@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDemoFeed } from './data.ts';
+import { buildDemoFeed } from './testing/demo-feed.ts';
+import { createInitialState, simulateRefresh } from './testing/tracker-fixture.ts';
 import type { OpenTrackRecord } from './data.ts';
 import { addDays, diffDays, formatDate } from './dates.ts';
-import { buildView, buildViews, getDashboardCounts, createInitialState, getMilestones, getStatus, hasTrackingMilestone, isDelivered, mergeOpenTrackResponse, saveUserFields, simulateRefresh, sortContainers } from './tracking.ts';
+import { buildView, buildViews, getDashboardCounts, getMilestones, getStatus, hasTrackingMilestone, isDelivered, mergeOpenTrackResponse, saveUserFields, sortContainers } from './tracking.ts';
 
 const NOW = new Date(2026, 9, 21, 10, 0);
 const TODAY = '2026-10-21';

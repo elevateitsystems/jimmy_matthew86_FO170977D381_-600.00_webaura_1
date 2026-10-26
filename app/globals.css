@@ -42,3 +42,6 @@
 
 .summary-cards{grid-template-columns:repeat(4,1fr)}.summary-card small{display:block;color:#8594a1;font-size:12px;margin-top:4px}@media(max-width:1050px){.summary-cards{grid-template-columns:repeat(2,1fr)}}
 .summary-card{height:100%}.toolbar .search{flex-basis:300px}
+.compact-table .table td{padding-top:8px;padding-bottom:8px}
+.settings-fieldset,.delivery-fieldset{border:0;margin:0;padding:0;min-width:0}
+.secondary-btn:disabled{opacity:.55;cursor:not-allowed}

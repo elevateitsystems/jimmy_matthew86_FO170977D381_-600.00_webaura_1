@@ -8,12 +8,12 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "node --test lib/*.test.ts"
+    "test": "node scripts/run-tests.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "latest",
     "lucide-react": "latest",
-    "next": "latest",
+    "next": "16.4.1",
     "react": "latest",
     "react-dom": "latest",
     "react-hook-form": "latest",

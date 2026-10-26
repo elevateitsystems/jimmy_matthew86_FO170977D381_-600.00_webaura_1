@@ -1,6 +1,6 @@
-import { buildDemoFeed, containerId, formatContainerNumber } from './data.ts';
+import { containerId, formatContainerNumber } from './data.ts';
 import type { OpenTrackEvent, OpenTrackRecord, UserFields } from './data.ts';
-import { diffDays, formatTime, todayISO } from './dates.ts';
+import { diffDays, todayISO } from './dates.ts';
 
 export type ContainerStatus = 'Not collected' | 'At warehouse' | 'Dehired' | 'Not tracked';
 export type Tone = 'red' | 'amber' | 'normal';
@@ -13,8 +13,6 @@ export type Milestone = 'AVAILABLE' | 'dischargedDate' | 'outgatedDate' | 'empty
 export const AMBER_DAYS = 2;
 /** Dehired containers go amber at 8 days since the empty was returned and red after this many. */
 export const DEHIRE_LIMIT_DAYS = 10;
-/** Every Nth refresh attempt fails, to demonstrate the connection-error behaviour. */
-export const FAILURE_EVERY = 3;
 
 export type TrackerState = {
   version: 1;
@@ -25,7 +23,7 @@ export type TrackerState = {
   /** Staff-entered fields, keyed by container id. Never touched by a refresh. */
   userFields: Record<string, UserFields>;
   refreshAttempts: number;
-  /** Index of the next demo OpenTrack response to serve. */
+  /** Index of the next response in a tracking sequence. */
   feedIndex: number;
   lastSyncedAt: string;
   connection: 'connected' | 'failed';
@@ -147,12 +145,6 @@ export function buildTimeline(record: OpenTrackRecord): { title: string; date: s
   return events.sort((a, b) => b.date.localeCompare(a.date)).map((event) => { const [title, desc] = EVENT_LABELS[event.type] ?? [event.type, 'Reported by OpenTrack.']; return { title, date: event.date, desc }; });
 }
 
-export function createInitialState(now: Date = new Date()): TrackerState {
-  const { frames, userFields } = buildDemoFeed(todayISO(now));
-  const empty: TrackerState = { version: 1, records: {}, trackedIds: [], userFields, refreshAttempts: 0, feedIndex: 1, lastSyncedAt: now.toISOString(), connection: 'connected' };
-  return mergeOpenTrackResponse(empty, frames[0], now).state;
-}
-
 /**
  * Applies one OpenTrack response. Duplicate rows (same container number in any formatting) collapse to one, the last row wins;
  * new containers are tracked when they contain a milestone; containers missing from the response are kept; user fields are untouched.
@@ -171,26 +163,6 @@ export function mergeOpenTrackResponse(state: TrackerState, response: OpenTrackR
   }
   const missing = Object.keys(state.records).filter((id) => !unique.has(id)).length;
   return { state: { ...state, records, trackedIds, connection: 'connected', lastError: undefined, lastSyncedAt: now.toISOString() }, outcome: { ok: true, received: response.length, duplicates: response.length - unique.size, added, updated, statusChanges, missing } };
-}
-
-/** Simulates a refresh: every FAILURE_EVERY-th attempt fails and keeps all current data; otherwise the next demo response is applied. */
-export function simulateRefresh(state: TrackerState, now: Date = new Date()): { state: TrackerState; outcome: RefreshOutcome } {
-  const attempt = state.refreshAttempts + 1;
-  if (attempt % FAILURE_EVERY === 0) {
-    const error = 'Could not reach OpenTrack (simulated connection timeout).';
-    return { state: { ...state, refreshAttempts: attempt, connection: 'failed', lastError: error }, outcome: { ok: false, error } };
-  }
-  const { frames } = buildDemoFeed(todayISO(now));
-  const merged = mergeOpenTrackResponse(state, frames[Math.min(state.feedIndex, frames.length - 1)], now);
-  return { state: { ...merged.state, refreshAttempts: attempt, feedIndex: state.feedIndex + 1 }, outcome: merged.outcome };
-}
-
-export function describeOutcome(outcome: RefreshOutcome, state: TrackerState): string {
-  if (!outcome.ok) return `${outcome.error} Showing the data last synced at ${formatTime(state.lastSyncedAt)}; your edits are unchanged.`;
-  const parts = [`${outcome.added} added to tracking`, `${outcome.updated} updated`, `${outcome.statusChanges} status change${outcome.statusChanges === 1 ? '' : 's'}`];
-  if (outcome.duplicates) parts.push(`${outcome.duplicates} duplicate row${outcome.duplicates === 1 ? '' : 's'} ignored`);
-  if (outcome.missing) parts.push(`${outcome.missing} not in response (kept)`);
-  return `OpenTrack demo data refreshed: ${parts.join(' · ')}.`;
 }
 
 /** Merges staff edits into one container's user fields. Blank values clear a field. Works for containers that are not tracked yet. */
