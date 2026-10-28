@@ -112,6 +112,13 @@ export default function Login() {
               )}
             </button>
           </form>
+              <div className="login-footer-notice" style={{ marginTop: "24px", fontSize: "12px", color: "#666", lineHeight: "1.5" }}>
+                   © 2026 Java Maryland LLC. Cargo Quay is a proprietary platform owned and operated by Java Maryland.{" "}
+                   <a href="https://javamaryland.com" target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "underline" }}>
+                       javamaryland.com
+                   </a>
+               </div>
+
         </div>
       </section>
     </main>
