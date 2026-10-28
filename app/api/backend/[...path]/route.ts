@@ -27,7 +27,11 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   if (!methods.includes(request.method)) return NextResponse.json({ message: 'Method not allowed.' }, { status: 405, headers: { Allow: methods.join(', ') } });
   if (request.method !== 'GET') {
     const origin = request.headers.get('origin');
-    if (origin && origin !== request.nextUrl.origin) return NextResponse.json({ message: 'Request origin is not allowed.' }, { status: 403 });
+    // NextURL normalizes loopback IPs to localhost; preserve the browser's actual host.
+    const requestOrigin = new URL(request.nextUrl.origin);
+    const host = request.headers.get('host');
+    if (host) requestOrigin.host = host;
+    if (origin && origin !== requestOrigin.origin) return NextResponse.json({ message: 'Request origin is not allowed.' }, { status: 403 });
   }
   if (path === 'auth/logout') {
     const response = NextResponse.json({ ok: true });
