@@ -102,3 +102,67 @@ test('invalid container responses fail visibly instead of silently using demo da
   assert.throws(() => parseContainer({ id: 'database-id-with-no-container-number' }));
   assert.throws(() => parsePage({ message: 'No list supplied' }, { page: 1, perPage: 15 }));
 });
+
+test('rail ETA contract preserves the destination-local date across a UTC calendar boundary', () => {
+  const row = parseContainer({
+    containerNumber: 'CAAU2252335', status: 'ON_WATER', onOperationsList: false,
+    eta: '2026-11-13T03:00:00.000Z', etaAtDestination: '2026-11-13T03:00:00.000Z',
+    etaAtTerminal: '2026-11-03T17:00:00.000Z', keyDate: '2026-11-13T03:00:00.000Z',
+    keyDateText: 'Nov 12, 2026', keyDateLabel: 'ETA', keyDateTimeZone: 'America/Chicago',
+    daysLabel: '11 days away', daysUntil: 11,
+    destination: 'Staff-entered warehouse', appointmentAt: '2026-11-15',
+  });
+  assert.equal(row.dateText, 'Nov 12, 2026');
+  assert.equal(row.dateLabel, 'ETA');
+  assert.equal(row.daysText, '11 days away');
+  assert.equal(row.daysRemaining, 11);
+  assert.equal(row.stage, 'On water / arriving');
+  assert.equal(row.tone, 'normal');
+  assert.equal(row.user.destination, 'Staff-entered warehouse');
+  assert.equal(row.user.appointment, '2026-11-15');
+});
+
+test('non-rail destination ETA uses the API display date without changing the port shipment', () => {
+  const row = parseContainer({ containerNumber: 'HASU1322250', status: 'ON_WATER', onOperationsList: false, eta: '2026-11-10T18:00:00.000Z', etaAtDestination: null, etaAtTerminal: '2026-11-10T18:00:00.000Z', keyDate: '2026-11-10T18:00:00.000Z', keyDateText: 'Nov 10, 2026', keyDateLabel: 'ETA', keyDateTimeZone: 'America/Chicago', daysLabel: '9 days away', daysUntil: 9 });
+  assert.equal(row.dateText, 'Nov 10, 2026');
+  assert.equal(row.dateLabel, 'ETA');
+  assert.equal(row.daysText, '9 days away');
+  assert.equal(row.daysRemaining, 9);
+});
+
+test('missing destination display text remains missing instead of inventing a formatted ETA', () => {
+  for (const keyDateText of [undefined, null, '']) {
+    const row = parseContainer({ containerNumber: 'TEST1234567', status: 'ON_WATER', onOperationsList: false, etaAtDestination: null, etaAtTerminal: '2026-11-03T17:00:00.000Z', keyDateText, keyDateLabel: 'ETA' });
+    assert.equal(row.dateText, undefined);
+  }
+});
+
+test('API relative days and past-ETA text are preserved without local UTC recalculation', () => {
+  const row = parseContainer({ containerNumber: 'TEST1234567', status: 'ON_WATER', onOperationsList: false, eta: '2000-01-02T03:00:00.000Z', keyDateText: 'Jan 1, 2000', keyDateLabel: 'ETA', daysLabel: '2 days past', daysUntil: -2 });
+  assert.equal(row.dateText, 'Jan 1, 2000');
+  assert.equal(row.daysText, '2 days past');
+  assert.equal(row.daysRemaining, -2);
+  assert.equal(row.tone, 'normal');
+});
+
+test('backend display labels and dates retain their meaning in other container views', () => {
+  for (const [status, label] of [['NOT_COLLECTED', 'Last free day'], ['AT_WAREHOUSE', 'Detention last free day'], ['DEHIRED', 'Empty returned']]) {
+    const row = parseContainer({ ...dehired, status, keyDateLabel: label, keyDateText: 'Nov 1, 2026', daysLabel: 'API relative text' });
+    assert.equal(row.dateLabel, label);
+    assert.equal(row.dateText, 'Nov 1, 2026');
+    assert.equal(row.daysText, 'API relative text');
+  }
+});
+
+test('ETA response mapping retains searched transit query and server pagination', () => {
+  const query = allContainersQuery({ ...trackerFilters('In transit'), search: 'CAAU2252335' });
+  const encoded = new URLSearchParams(queryString(query));
+  assert.equal(encoded.get('search'), 'CAAU2252335');
+  assert.equal(encoded.get('view'), 'in_transit');
+  assert.equal(encoded.has('bucket'), false);
+  const page = parsePage({ data: [{ containerNumber: 'CAAU2252335', status: 'ON_WATER', onOperationsList: false, keyDateLabel: 'ETA', keyDateText: 'Nov 12, 2026', daysLabel: '11 days away' }], pagination: { total: 1, page: 1, perPage: 100 } }, query);
+  assert.equal(page.rows[0].dateText, 'Nov 12, 2026');
+  assert.equal(page.total, 1);
+  assert.equal(page.page, 1);
+  assert.equal(page.perPage, 100);
+});

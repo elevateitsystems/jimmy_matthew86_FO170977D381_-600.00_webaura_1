@@ -149,6 +149,6 @@ export function useContainerDetail(id: string) {
 
 export function useContainerOptions(enabled = true) {
   const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  useEffect(() => { if (enabled && !state.optionsLoaded && !state.optionsLoading) void loadOptions(); }, [state.optionsLoaded, enabled]);
+  useEffect(() => { if (enabled && !state.optionsLoaded && !state.optionsLoading) void loadOptions(); }, [state.optionsLoaded, enabled, state.revision]);
   return { containers: state.options, loading: state.optionsLoading || !state.optionsLoaded && !state.optionsError, error: state.optionsError, retry: loadOptions };
 }
