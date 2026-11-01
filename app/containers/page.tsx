@@ -5,7 +5,7 @@ import { Download, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
 import { AppShell } from '../../components/layout';
 import { LoadingScreen } from '../../components/loading';
 import { ContainerTable, Metrics } from '../../components/shared';
-import { formatDate } from '../../lib/dates';
+import { containerExportRow } from '../../lib/container-export';
 import { getDashboardCounts } from '../../lib/tracking';
 import { getAllContainers, useContainerList, useContainerTracker } from '../../lib/container-store';
 import { apiResponse, errorMessage } from '../../lib/api';
@@ -45,7 +45,7 @@ function ContainerContent() {
         // The collection documents bucket-only exports. Preserve search/transit filters by exporting all matching API pages.
         const matching=await getAllContainers(filters(view).view?{...filters(view),search}:{bucket:filters(view).bucket,search});
         const XLSX=await import('xlsx');
-        const sheet=XLSX.utils.json_to_sheet(matching.map(item=>({Container:item.container,MBL:item.mbl,Size:item.size,'Port · terminal':item.port,Status:item.delivered?'Delivered':item.status,'Key date':`${item.dateLabel}: ${formatDate(item.dateValue)}`,Days:item.daysText,'Final destination':item.user.destination||'',Carrier:item.user.carrier||'',Appointment:formatDate(item.user.appointment),Delivered:formatDate(item.user.deliveredDate),Notes:item.user.notes||''})));
+        const sheet=XLSX.utils.json_to_sheet(matching.map(containerExportRow));
         sheet['!cols']=[18,16,14,24,22,36,22,22,28,14,14,30].map(wch=>({wch})); const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,'Containers');XLSX.writeFile(book,'containers.xlsx');
       }else{
         const response=await apiResponse(`/containers/export?${new URLSearchParams({bucket:filters(view).bucket||'all'})}`);

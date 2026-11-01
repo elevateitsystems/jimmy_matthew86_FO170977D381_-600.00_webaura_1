@@ -30,6 +30,8 @@ npm start
 
 Set `API_BASE_URL` in your hosting provider's server environment, including `/api`. Use a stable HTTPS backend URL for production; temporary `trycloudflare.com` URLs depend on a running local tunnel. The frontend requires a Node.js server for its API proxy and cannot be deployed as a static export.
 
+Behind a reverse proxy, set `APP_ORIGIN=https://cargoquay.com` in the frontend server's production environment to declare its public origin. Keep this unset for local development. Alternatively, the trusted proxy must overwrite `X-Forwarded-Host` and `X-Forwarded-Proto` with the public host and protocol. A mismatch between the browser's HTTPS origin and an internal HTTP host causes the frontend's write-request guard to return `403 Request origin is not allowed`. Restart/redeploy the frontend after changing production environment variables.
+
 ## Checks
 
 ```powershell

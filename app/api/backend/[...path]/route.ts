@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requestOrigin } from '../../../../lib/request-origin';
 
 export const runtime = 'nodejs';
 const SESSION_COOKIE = 'jm_backend_session';
@@ -25,13 +26,10 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   const methods = routes[path] ?? (/^containers\/[a-zA-Z]{4}\d{7}$/.test(path) ? ['GET', 'PATCH'] : undefined);
   if (!methods) return NextResponse.json({ message: 'Endpoint not found.' }, { status: 404 });
   if (!methods.includes(request.method)) return NextResponse.json({ message: 'Method not allowed.' }, { status: 405, headers: { Allow: methods.join(', ') } });
+  const publicOrigin = requestOrigin(request.headers, request.nextUrl.origin, process.env.APP_ORIGIN);
   if (request.method !== 'GET') {
     const origin = request.headers.get('origin');
-    // NextURL normalizes loopback IPs to localhost; preserve the browser's actual host.
-    const requestOrigin = new URL(request.nextUrl.origin);
-    const host = request.headers.get('host');
-    if (host) requestOrigin.host = host;
-    if (origin && origin !== requestOrigin.origin) return NextResponse.json({ message: 'Request origin is not allowed.' }, { status: 403 });
+    if (origin && origin !== publicOrigin) return NextResponse.json({ message: 'Request origin is not allowed.' }, { status: 403 });
   }
   if (path === 'auth/logout') {
     const response = NextResponse.json({ ok: true });
@@ -40,8 +38,11 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   }
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   if (path !== 'auth/login' && !token) return NextResponse.json({ message: 'Please sign in to continue.' }, { status: 401 });
+  const configuredBackend = process.env.API_BASE_URL;
+  let backendOrigin: string | undefined;
   try {
-    const base = new URL(process.env.API_BASE_URL || 'http://localhost:4003/api');
+    const base = new URL(configuredBackend || 'http://localhost:4003/api');
+    backendOrigin = base.origin;
     if (!['http:', 'https:'].includes(base.protocol)) throw new Error('Invalid backend URL');
     base.pathname = `${base.pathname.replace(/\/$/, '')}/${path}`;
     base.search = request.nextUrl.search;
@@ -64,7 +65,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
       const accessToken = payload.accessToken ?? payload.token ?? payload.access_token ?? data.accessToken ?? data.token ?? data.access_token;
       if (typeof accessToken !== 'string' || !accessToken) return NextResponse.json({ message: 'The login response did not include an access token.' }, { status: 502 });
       const response = NextResponse.json({ ok: true });
-      response.cookies.set(SESSION_COOKIE, accessToken, { httpOnly: true, sameSite: 'lax', path: '/', secure: request.nextUrl.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https' });
+      response.cookies.set(SESSION_COOKIE, accessToken, { httpOnly: true, sameSite: 'lax', path: '/', secure: publicOrigin?.startsWith('https://') ?? request.nextUrl.protocol === 'https:' });
       return response;
     }
     const responseHeaders = new Headers({ 'Cache-Control': 'no-store' });
@@ -76,10 +77,9 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     if (upstream.status === 401) response.cookies.set(SESSION_COOKIE, '', { path: '/', maxAge: 0, httpOnly: true, sameSite: 'lax' });
     return response;
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') {
-      const failure = error as { name?: string; message?: string; cause?: { code?: string } };
-      console.error('Backend connection failed', { method: request.method, path, error: failure.name, message: failure.message ?? String(error), code: failure.cause?.code });
-    }
+    const failure = error as { name?: string; code?: string; cause?: { code?: string } } | null;
+    // Keep production failures diagnosable without logging credentials, request bodies or tokens.
+    console.error('Backend connection failed', { method: request.method, path, backendOrigin, backendConfigured: Boolean(configuredBackend), error: failure?.name, code: failure?.cause?.code ?? failure?.code });
     const timeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
     return NextResponse.json({ message: timeout ? 'The backend took too long to respond. Please try again.' : 'Cannot connect to the backend. Please check that the API server is running.' }, { status: timeout ? 504 : 502 });
   }
