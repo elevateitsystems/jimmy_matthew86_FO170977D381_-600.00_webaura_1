@@ -1,23 +1,24 @@
 import { ApiError } from './api';
 import { containerId } from './data';
 import type { UserFields, OpenTrackRecord } from './data';
-import { buildView, getDashboardCounts, getDaysRemaining, getTone, hasTrackingMilestone, isDelivered } from './tracking';
+import { buildView, getDashboardCounts, getDaysRemaining, getTone, hasTrackingMilestone, isDelivered, isRailStatus } from './tracking';
 import type { ContainerStatus, ContainerView, MetricCount } from './tracking';
 import { dayNumber, todayISO } from './dates';
 
 type ObjectValue = Record<string, unknown>;
 export type TimelineEvent = { title: string; date: string; desc: string };
-export type BackendContainer = ContainerView & { timeline?: TimelineEvent[]; dateText?: string };
+export type BackendContainer = ContainerView & { timeline?: TimelineEvent[]; dateText?: string; statusLabel?: string };
 export type DashboardSummary = ReturnType<typeof getDashboardCounts> & { lastSyncedAt?: string; syncFailed?: boolean };
 export type WorkspaceSettings = { emailUpdates: boolean; compactTable: boolean; defaultView: 'Active' | 'All containers'; mailConfigured?: boolean; alertEmail?: string };
 export type ContainerQuery = { view?: 'arrived' | 'in_transit' | 'delivered'; bucket?: string; search?: string; page: number; perPage: number };
 export type ContainerPage = { rows: BackendContainer[]; total: number; page: number; perPage: number };
-export type TrackerView = 'At origin' | 'On water / arriving' | 'Not collected' | 'At warehouse' | 'Dehired' | 'Delivered' | 'Active' | 'All containers' | 'In transit' | 'Awaiting destination' | 'Overdue';
+export type TrackerView = 'At origin' | 'On water / arriving' | 'At ocean terminal' | 'On rail' | 'At rail terminal' | 'Not collected' | 'At warehouse' | 'Dehired' | 'Delivered' | 'Active' | 'All containers' | 'In transit' | 'Awaiting destination' | 'Overdue';
 
 export function trackerFilters(view: TrackerView): Pick<ContainerQuery, 'view' | 'bucket'> {
   const groups: Record<TrackerView, Pick<ContainerQuery, 'view' | 'bucket'>> = {
     Active: { view: 'arrived', bucket: 'open' }, 'All containers': { bucket: 'all' }, 'In transit': { view: 'in_transit' },
     'At origin': { view: 'in_transit', bucket: 'at_origin' }, 'On water / arriving': { view: 'in_transit', bucket: 'on_water' },
+    'At ocean terminal': { view: 'arrived', bucket: 'at_ocean_terminal' }, 'On rail': { view: 'in_transit', bucket: 'on_rail' }, 'At rail terminal': { view: 'arrived', bucket: 'at_rail_terminal' },
     'Not collected': { view: 'arrived', bucket: 'not_collected' }, 'At warehouse': { view: 'arrived', bucket: 'at_warehouse' }, Dehired: { view: 'arrived', bucket: 'dehired' },
     Delivered: { view: 'delivered', bucket: 'delivered' }, 'Awaiting destination': { view: 'arrived', bucket: 'no_destination' }, Overdue: { view: 'arrived', bucket: 'overdue' },
   };
@@ -81,14 +82,15 @@ export function parseContainer(value: unknown): BackendContainer {
     driver: text(staff.driverName ?? staff.driver), truckNumber: text(staff.truckNumber), contactName: text(staff.receivingContact ?? staff.contactName), contactPhone: text(staff.contactPhone), destinationAddress: text(staff.deliveryAddress ?? staff.destinationAddress), notes: text(staff.notes),
   };
   const history = Array.isArray(row.history) ? row.history : Array.isArray(row.events) ? row.events : [];
+  const statusKey = labelKey(row.status ?? row.trackingStatus);
+  const railLocation = statusKey === 'onrail' || statusKey === 'atrailterminal';
   const record: OpenTrackRecord = {
-    container: numberValue, mbl: text(row.mbl ?? row.masterBill ?? row.masterBillNumber), size: text(row.size ?? row.equipmentSize ?? row.equipmentType), origin: text(row.origin ?? row.originName ?? row.originPort), port: text(row.port ?? row.portTerminal ?? row.destinationPort), line: text(row.line ?? row.steamshipLine ?? row.shippingLine), vessel: text(row.vessel ?? row.vesselName),
+    container: numberValue, mbl: text(row.mbl ?? row.masterBill ?? row.masterBillNumber), size: text(row.size ?? row.equipmentSize ?? row.equipmentType), origin: text(row.origin ?? row.originName ?? row.originPort), port: text(railLocation ? row.portTerminal ?? row.port ?? row.destinationPort : row.port ?? row.portTerminal ?? row.destinationPort), line: text(row.line ?? row.steamshipLine ?? row.shippingLine), vessel: text(row.vessel ?? row.vesselName),
     eta: inputDate(row.eta ?? row.etaAtTerminal), dischargedDate: inputDate(row.dischargedDate ?? row.dischargedAt), outgatedDate: inputDate(row.outgatedDate ?? row.outgatedAt), emptyReturnedDate: inputDate(row.emptyReturnedDate ?? row.emptyReturnedAt), lastFreeDay: inputDate(row.lastFreeDay ?? row.terminalLastFreeDay), detentionLastFreeDay: inputDate(row.detentionLastFreeDay),
     history: history.map((event) => object(event)).map((event) => ({ type: text(event.type ?? event.eventType), date: text(event.date ?? event.occurredAt ?? event.timestamp) })),
   };
-  const statusKey = labelKey(row.status ?? row.trackingStatus);
   const transit = ['atorigin', 'onwater', 'onwaterarriving', 'intransit', 'nottracked'].includes(statusKey);
-  const statusMap: Record<string, ContainerStatus> = { notcollected: 'Not collected', atwarehouse: 'At warehouse', dehired: 'Dehired', nottracked: 'Not tracked', emptyreturned: 'Dehired', fulloutgated: 'At warehouse', available: 'Not collected', discharged: 'Not collected' };
+  const statusMap: Record<string, ContainerStatus> = { notcollected: 'Not collected', atoceanterminal: 'At ocean terminal', onrail: 'On rail', atrailterminal: 'At rail terminal', atwarehouse: 'At warehouse', dehired: 'Dehired', nottracked: 'Not tracked', emptyreturned: 'Dehired', fulloutgated: 'At warehouse', available: 'Not collected', discharged: 'Not collected' };
   const tracked = typeof row.onOperationsList === 'boolean' ? row.onOperationsList : typeof row.tracked === 'boolean' ? row.tracked : typeof row.isTracked === 'boolean' ? row.isTracked : !transit && (hasTrackingMilestone(record) || !!statusMap[statusKey] || statusKey === 'delivered' || row.delivered === true || row.isDelivered === true);
   const result: BackendContainer = buildView(containerId(numberValue), record, user, tracked, todayISO());
   const status = statusMap[statusKey] ?? (statusKey === 'delivered' ? statusMap[labelKey(row.trackingStatus)] : undefined) ?? result.status;
@@ -109,13 +111,14 @@ export function parseContainer(value: unknown): BackendContainer {
   const days = object(row.days);
   const tone = text(row.tone ?? row.urgency ?? days.tone).toLowerCase();
   if (['red', 'amber', 'normal'].includes(tone)) result.tone = tone as ContainerView['tone'];
-  if (result.delivered || tone === 'none' || !tracked) result.tone = 'normal';
+  if (result.delivered || tone === 'none' || !tracked && !isRailStatus(status)) result.tone = 'normal';
   if (typeof (row.daysRemaining ?? row.daysUntil) === 'number') result.daysRemaining = number(row.daysRemaining ?? row.daysUntil);
   if (typeof (row.daysText ?? row.daysLabel ?? days.text) === 'string') result.daysText = text(row.daysText ?? row.daysLabel ?? days.text);
   const keyDate = object(row.keyDate);
   if (row.dateLabel || row.keyDateLabel || keyDate.label) result.dateLabel = text(row.dateLabel ?? row.keyDateLabel ?? keyDate.label);
   result.dateValue = inputDate(row.dateValue ?? row.keyDateValue ?? keyDate.value ?? keyDate.date ?? (typeof row.keyDate === 'string' ? row.keyDate : undefined)) ?? result.dateValue;
   result.dateText = text(row.keyDateText) || undefined;
+  result.statusLabel = text(row.statusLabel) || undefined;
   if (Array.isArray(row.timeline)) result.timeline = row.timeline.map((entry) => { const event = object(entry); return { title: text(event.title ?? event.label ?? event.type), date: text(event.date ?? event.occurredAt ?? event.timestamp), desc: text(event.desc ?? event.description) }; });
   return result;
 }
@@ -139,22 +142,23 @@ export function parseSummary(payload: unknown): DashboardSummary {
     const item = object(find(keys));
     return { count: number(item.count ?? item.total ?? item.value), red: number(item.red ?? item.overdue ?? item.overdueCount), amber: number(item.amber ?? item.dueSoon ?? item.dueSoonCount) };
   };
-  if (!entries.length || !find(['atorigin', 'notcollected', 'atwarehouse', 'delivered', 'dehired', 'onwater', 'onwaterarriving'])) throw new ApiError('The backend returned an unsupported dashboard summary format.', 502);
-  const values = { 'At origin': read(['atorigin']), 'On water / arriving': read(['onwater', 'onwaterarriving']), 'Not collected': read(['notcollected']), 'At warehouse': read(['atwarehouse']), Dehired: read(['dehired']), Delivered: read(['delivered']) };
+  if (!entries.length || !find(['atorigin', 'atoceanterminal', 'onrail', 'atrailterminal', 'notcollected', 'atwarehouse', 'delivered', 'dehired', 'onwater', 'onwaterarriving'])) throw new ApiError('The backend returned an unsupported dashboard summary format.', 502);
+  const values = { 'At origin': read(['atorigin']), 'On water / arriving': read(['onwater', 'onwaterarriving']), 'At ocean terminal': read(['atoceanterminal']), 'On rail': read(['onrail']), 'At rail terminal': read(['atrailterminal']), 'Not collected': read(['notcollected']), 'At warehouse': read(['atwarehouse']), Dehired: read(['dehired']), Delivered: read(['delivered']) };
   values['Not collected'].red = number(body.notCollectedPastLastFreeDay, values['Not collected'].red);
+  values['At rail terminal'].red = number(body.railPastLastFreeDay, values['At rail terminal'].red);
   values.Dehired.red = number(body.dehiredOverTenDays, values.Dehired.red);
-  // These three operational states partition the overdue total reported by the API.
-  values['At warehouse'].red = number(body.atWarehousePastDetentionLastFreeDay, typeof body.overdue === 'number' ? Math.max(0, body.overdue - values['Not collected'].red - values.Dehired.red) : values['At warehouse'].red);
+  // These four operational states partition the overdue total reported by the API.
+  values['At warehouse'].red = number(body.atWarehousePastDetentionLastFreeDay, typeof body.overdue === 'number' ? Math.max(0, body.overdue - values['Not collected'].red - values['At rail terminal'].red - values.Dehired.red) : values['At warehouse'].red);
   const tabs = object(body.tabs);
   const rawFilters = body.summary ?? body.filters;
   const filters = Array.isArray(rawFilters) ? Object.fromEntries(rawFilters.map(item => { const filter = object(item); return [text(filter.id), filter.count]; })) : object(rawFilters);
   const lastSync = object(body.lastSync);
   return {
     metrics: values,
-    active: number(body.active ?? body.arrived ?? body.open ?? tabs.arrived ?? tabs.active, values['Not collected'].count + values['At warehouse'].count + values.Dehired.count),
-    inTransit: number(body.inTransit ?? tabs.inTransit ?? tabs.in_transit, values['At origin'].count + values['On water / arriving'].count),
+    active: number(body.active ?? body.arrived ?? body.open ?? tabs.arrived ?? tabs.active, values['At ocean terminal'].count + values['At rail terminal'].count + values['Not collected'].count + values['At warehouse'].count + values.Dehired.count),
+    inTransit: number(body.inTransit ?? tabs.inTransit ?? tabs.in_transit, values['At origin'].count + values['On water / arriving'].count + values['On rail'].count),
     deliveredRecent: number(body.deliveredRecent ?? body.deliveredLast30Days ?? object(find(['delivered'])).recent),
-    summary: { 'Awaiting destination': number(body.noDestination ?? filters['Awaiting destination'] ?? filters.noDestination ?? filters.no_destination), 'Awaiting carrier': number(filters['Awaiting carrier'] ?? filters.noCarrier), 'Booked, not yet delivered': number(filters['Booked, not yet delivered'] ?? filters.booked), 'Due soon': number(filters['Due soon'] ?? filters.dueSoon), Overdue: number(body.overdue ?? filters.Overdue ?? filters.overdue, values['Not collected'].red + values['At warehouse'].red + values.Dehired.red) },
+    summary: { 'Awaiting destination': number(body.noDestination ?? filters['Awaiting destination'] ?? filters.noDestination ?? filters.no_destination), 'Awaiting carrier': number(filters['Awaiting carrier'] ?? filters.noCarrier), 'Booked, not yet delivered': number(filters['Booked, not yet delivered'] ?? filters.booked), 'Due soon': number(filters['Due soon'] ?? filters.dueSoon), Overdue: number(body.overdue ?? filters.Overdue ?? filters.overdue, values['Not collected'].red + values['At rail terminal'].red + values['At warehouse'].red + values.Dehired.red) },
     lastSyncedAt: text(body.lastSyncedAt ?? object(body.sync).lastSyncedAt ?? (lastSync.success === true ? lastSync.finishedAt : undefined)) || undefined,
     syncFailed: lastSync.success === false,
   };

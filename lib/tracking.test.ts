@@ -201,7 +201,7 @@ test('containers move between active and Delivered as fields are completed and k
 test('dashboard numbers on the initial demo data match the client reference', () => {
   const { active, inTransit, deliveredRecent, metrics, summary } = getDashboardCounts(buildViews(createInitialState(NOW), TODAY), TODAY);
   assert.equal(active, 122); assert.equal(inTransit, 169); assert.equal(deliveredRecent, 13);
-  assert.deepEqual(Object.fromEntries(Object.entries(metrics).map(([key, value]) => [key, value.count])), { 'At origin': 0, 'On water / arriving': 169, 'Not collected': 17, 'At warehouse': 28, Dehired: 77, Delivered: 19 });
+  assert.deepEqual(Object.fromEntries(Object.entries(metrics).map(([key, value]) => [key, value.count])), { 'At origin': 0, 'On water / arriving': 169, 'At ocean terminal': 0, 'On rail': 0, 'At rail terminal': 0, 'Not collected': 17, 'At warehouse': 28, Dehired: 77, Delivered: 19 });
   assert.equal(metrics['Not collected'].count + metrics['At warehouse'].count + metrics.Dehired.count, active);
   assert.equal(metrics['Not collected'].red, 1); assert.equal(metrics['At warehouse'].red, 0); assert.equal(metrics.Dehired.red, 57);
   assert.equal(summary['Awaiting destination'], 62); assert.equal(summary.Overdue, 58);

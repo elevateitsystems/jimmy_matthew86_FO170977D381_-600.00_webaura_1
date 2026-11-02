@@ -2,7 +2,7 @@ import { containerId, formatContainerNumber } from './data.ts';
 import type { OpenTrackEvent, OpenTrackRecord, UserFields } from './data.ts';
 import { diffDays, todayISO } from './dates.ts';
 
-export type ContainerStatus = 'Not collected' | 'At warehouse' | 'Dehired' | 'Not tracked';
+export type ContainerStatus = 'Not collected' | 'At ocean terminal' | 'On rail' | 'At rail terminal' | 'At warehouse' | 'Dehired' | 'Not tracked';
 export type Tone = 'red' | 'amber' | 'normal';
 export type TransitStage = 'At origin' | 'On water / arriving';
 /** A delivery counts as recent when its delivered date is at most this many days ago. */
@@ -37,6 +37,11 @@ export type ContainerView = OpenTrackRecord & {
   /** Days left until the deadline (negative once passed); for Dehired, days left until the 10-day limit. Null when the date is missing or invalid. */
   daysRemaining: number | null; daysText: string;
 };
+
+export const isRailStatus = (status: ContainerStatus) => status === 'At ocean terminal' || status === 'On rail' || status === 'At rail terminal';
+export function getDisplayStatus(container: Pick<ContainerView, 'status' | 'tracked' | 'stage'>): ContainerStatus | TransitStage {
+  return isRailStatus(container.status) ? container.status : !container.tracked ? container.stage ?? 'Not tracked' : container.status;
+}
 
 export type RefreshOutcome =
   | { ok: true; received: number; duplicates: number; added: number; updated: number; statusChanges: number; missing: number }
@@ -102,7 +107,7 @@ export function buildViews(state: TrackerState, today: string = todayISO()): Con
 export type SummaryFilter = 'Awaiting destination' | 'Awaiting carrier' | 'Booked, not yet delivered' | 'Due soon' | 'Overdue';
 export const summaryFilters: SummaryFilter[] = ['Awaiting destination', 'Awaiting carrier', 'Booked, not yet delivered', 'Due soon', 'Overdue'];
 /** On the tracking list and not yet delivered. */
-export const isActive = (item: ContainerView) => item.tracked && !item.delivered;
+export const isActive = (item: ContainerView) => (item.tracked || isRailStatus(item.status)) && !item.delivered && item.status !== 'On rail';
 export function matchesSummary(item: ContainerView, filter: SummaryFilter): boolean {
   if (filter === 'Awaiting destination') return !present(item.user.destination);
   if (filter === 'Awaiting carrier') return !present(item.user.carrier);
@@ -114,11 +119,11 @@ export type MetricCount = { count: number; red: number; amber: number };
 /** Every dashboard number, derived from the container views. Each container is counted at most once per metric. */
 export function getDashboardCounts(views: ContainerView[], today: string = todayISO()) {
   const count = (items: ContainerView[]): MetricCount => ({ count: items.length, red: items.filter((item) => item.tone === 'red').length, amber: items.filter((item) => item.tone === 'amber').length });
-  const active = views.filter(isActive), delivered = views.filter((item) => item.tracked && item.delivered), inTransit = views.filter((item) => !item.tracked);
+  const active = views.filter(isActive), delivered = views.filter((item) => (item.tracked || isRailStatus(item.status)) && item.delivered), inTransit = views.filter((item) => item.status === 'On rail' ? !item.delivered : !item.tracked && !isRailStatus(item.status));
   const deliveredRecent = delivered.filter((item) => { const ago = diffDays(item.user.deliveredDate, today); return ago !== null && ago >= 0 && ago <= RECENT_DELIVERY_DAYS; }).length;
   return {
     active: active.length, inTransit: inTransit.length, deliveredRecent,
-    metrics: { 'At origin': count(inTransit.filter((item) => item.stage === 'At origin')), 'On water / arriving': count(inTransit.filter((item) => item.stage === 'On water / arriving')), 'Not collected': count(active.filter((item) => item.status === 'Not collected')), 'At warehouse': count(active.filter((item) => item.status === 'At warehouse')), Dehired: count(active.filter((item) => item.status === 'Dehired')), Delivered: count(delivered) },
+    metrics: { 'At origin': count(inTransit.filter((item) => item.status !== 'On rail' && item.stage === 'At origin')), 'On water / arriving': count(inTransit.filter((item) => item.status !== 'On rail' && item.stage === 'On water / arriving')), 'At ocean terminal': count(active.filter((item) => item.status === 'At ocean terminal')), 'On rail': count(inTransit.filter((item) => item.status === 'On rail')), 'At rail terminal': count(active.filter((item) => item.status === 'At rail terminal')), 'Not collected': count(active.filter((item) => item.status === 'Not collected')), 'At warehouse': count(active.filter((item) => item.status === 'At warehouse')), Dehired: count(active.filter((item) => item.status === 'Dehired')), Delivered: count(delivered) },
     summary: Object.fromEntries(summaryFilters.map((filter) => [filter, active.filter((item) => matchesSummary(item, filter)).length])) as Record<SummaryFilter, number>,
   };
 }
