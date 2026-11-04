@@ -7,7 +7,11 @@ import { dayNumber, todayISO } from './dates';
 
 type ObjectValue = Record<string, unknown>;
 export type TimelineEvent = { title: string; date: string; desc: string };
-export type BackendContainer = ContainerView & { timeline?: TimelineEvent[]; dateText?: string; statusLabel?: string };
+export type BackendContainer = ContainerView & {
+  timeline?: TimelineEvent[]; dateText?: string; statusLabel?: string;
+  /** Feed-owned rail destination, independent of staff-entered user.destination. */
+  readonly railDestination?: string;
+};
 export type DashboardSummary = ReturnType<typeof getDashboardCounts> & { lastSyncedAt?: string; syncFailed?: boolean };
 export type WorkspaceSettings = { emailUpdates: boolean; compactTable: boolean; defaultView: 'Active' | 'All containers'; mailConfigured?: boolean; alertEmail?: string };
 export type ContainerQuery = { view?: 'arrived' | 'in_transit' | 'delivered'; bucket?: string; search?: string; page: number; perPage: number };
@@ -92,7 +96,10 @@ export function parseContainer(value: unknown): BackendContainer {
   const transit = ['atorigin', 'onwater', 'onwaterarriving', 'intransit', 'nottracked'].includes(statusKey);
   const statusMap: Record<string, ContainerStatus> = { notcollected: 'Not collected', atoceanterminal: 'At ocean terminal', onrail: 'On rail', atrailterminal: 'At rail terminal', atwarehouse: 'At warehouse', dehired: 'Dehired', nottracked: 'Not tracked', emptyreturned: 'Dehired', fulloutgated: 'At warehouse', available: 'Not collected', discharged: 'Not collected' };
   const tracked = typeof row.onOperationsList === 'boolean' ? row.onOperationsList : typeof row.tracked === 'boolean' ? row.tracked : typeof row.isTracked === 'boolean' ? row.isTracked : !transit && (hasTrackingMilestone(record) || !!statusMap[statusKey] || statusKey === 'delivered' || row.delivered === true || row.isDelivered === true);
-  const result: BackendContainer = buildView(containerId(numberValue), record, user, tracked, todayISO());
+  const result: BackendContainer = {
+    ...buildView(containerId(numberValue), record, user, tracked, todayISO()),
+    railDestination: typeof row.finalDestinationName === 'string' && row.finalDestinationName.trim() ? row.finalDestinationName : undefined,
+  };
   const status = statusMap[statusKey] ?? (statusKey === 'delivered' ? statusMap[labelKey(row.trackingStatus)] : undefined) ?? result.status;
   if (status !== result.status) {
     result.status = status;
