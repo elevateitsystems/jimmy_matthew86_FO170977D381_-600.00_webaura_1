@@ -46,7 +46,7 @@ function ContainerContent() {
         const matching=await getAllContainers(filters(view).view?{...filters(view),search}:{bucket:filters(view).bucket,search});
         const XLSX=await import('xlsx');
         const sheet=XLSX.utils.json_to_sheet(matching.map(containerExportRow));
-        sheet['!cols']=[18,16,14,24,22,36,22,22,28,14,14,30].map(wch=>({wch})); const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,'Containers');XLSX.writeFile(book,'containers.xlsx');
+        sheet['!cols']=[18,16,14,24,22,36,22,22,22,28,14,14,30].map(wch=>({wch})); const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,'Containers');XLSX.writeFile(book,'containers.xlsx');
       }else{
         const response=await apiResponse(`/containers/export?${new URLSearchParams({bucket:filters(view).bucket||'all'})}`);
         download(await response.blob(),'containers.xlsx');
